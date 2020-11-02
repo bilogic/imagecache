@@ -61,6 +61,9 @@ class ImageCache
     {
         $this->manager = $manager ? $manager : new ImageManager();
 
+        $this->cache = \Storage::disk('local')->getDriver();
+        return;
+
         if (is_null($cache)) {
             // get laravel app
             $app = function_exists('app') ? app() : null;
@@ -296,6 +299,28 @@ class ImageCache
         $lifetime = is_null($lifetime) ? $this->lifetime : intval($lifetime);
 
         $key = $this->checksum();
+
+        $file = "imagecache/$key";
+
+        $process = true;
+        if ($this->cache->has($file)) {
+            $expires = Carbon::parse($this->cache->getTimestamp($file))->addMinutes($lifetime);
+            if (Carbon::now() < $expires) {
+                $process = false;
+            }
+        }
+
+        if ($process) {
+            // process image data
+            $image = $this->process();
+
+            // encode image data only if image is not encoded yet
+            $encoded = $image->encoded ? $image->encoded : (string) $image->encode();
+
+            // save to cache...
+            $this->cache->write($file, $encoded);
+        }
+        return $this->cache->getAdapter()->getPathPrefix().$file;
 
         // try to get image from cache
         $cachedImageData = $this->cache->get($key);

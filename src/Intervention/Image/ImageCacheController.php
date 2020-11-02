@@ -46,8 +46,7 @@ class ImageCacheController extends BaseController
 
         // image manipulation based on callback
         $manager = new ImageManager(Config::get('image'));
-        $content = $manager->cache(function ($image) use ($template, $path) {
-
+        $path = $manager->cache(function ($image) use ($template, $path) {
             if ($template instanceof Closure) {
                 // build from closure callback template
                 $template($image->make($path));
@@ -55,9 +54,9 @@ class ImageCacheController extends BaseController
                 // build from filter template
                 $image->make($path)->filter($template);
             }
-        }, config('imagecache.lifetime'));
+        }, config('imagecache.lifetime'), true);
 
-        return $this->buildResponse($content);
+        return $this->buildResponseWithPath($path);
     }
 
     /**
@@ -70,7 +69,7 @@ class ImageCacheController extends BaseController
     {
         $path = $this->getImagePath($filename);
 
-        return $this->buildResponse(file_get_contents($path));
+        return $this->buildResponseWithPath($path);
     }
 
     /**
@@ -161,5 +160,28 @@ class ImageCacheController extends BaseController
             'Content-Length' => strlen($content),
             'Etag' => $etag
         ]);
+    }
+
+    protected function buildResponseWithPath($path)
+    {
+        // define mime type
+        $mime = mime_content_type($path);
+
+        // respond with 304 not modified if browser has the image cached
+        $etag = md5_file($path);
+        $not_modified = isset($_SERVER['HTTP_IF_NONE_MATCH']) && $_SERVER['HTTP_IF_NONE_MATCH'] == $etag;
+        $size = $not_modified ? null : filesize($path);
+
+        $headers = [
+            'Content-Type' => $mime,
+            'Cache-Control' => 'max-age=' . (config('imagecache.lifetime') * 60) . ', public',
+            'Content-Length' => $size,
+            'Etag' => $etag
+        ];
+
+        if ($not_modified) {
+            return response('', 304)->withHeaders($headers);
+        }
+        return response()->file($path, $headers);
     }
 }
